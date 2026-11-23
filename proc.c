@@ -323,22 +323,31 @@ void
 scheduler(void)
 {
   struct proc *p;
+  struct proc *highP;
+  struct proc *p1;
   struct cpu *c = mycpu();
   c->proc = 0;
-  
+
   for(;;){
-    // Enable interrupts on this processor.
+    // Habilitar interrupciones en este procesador
     sti();
 
-    // Loop over process table looking for process to run.
+    // Recorrer la tabla de procesos buscando el de mayor prioridad (menor numero)
     acquire(&ptable.lock);
     for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
       if(p->state != RUNNABLE)
         continue;
 
-      // Switch to chosen process.  It is the process's job
-      // to release ptable.lock and then reacquire it
-      // before jumping back to us.
+      highP = p;
+      for(p1 = ptable.proc; p1 < &ptable.proc[NPROC]; p1++){
+        if(p1->state != RUNNABLE)
+          continue;
+        if(p1->priority < highP->priority)
+          highP = p1;
+      }
+      p = highP;
+
+      // Cambiar al proceso seleccionado
       c->proc = p;
       switchuvm(p);
       p->state = RUNNING;
@@ -346,15 +355,12 @@ scheduler(void)
       swtch(&(c->scheduler), p->context);
       switchkvm();
 
-      // Process is done running for now.
-      // It should have changed its p->state before coming back.
+      // El proceso termino su turno actual
       c->proc = 0;
     }
     release(&ptable.lock);
-
   }
 }
-
 // Enter scheduler.  Must hold only ptable.lock
 // and have changed proc->state. Saves and restores
 // intena because intena is a property of this
@@ -389,6 +395,11 @@ yield(void)
   myproc()->state = RUNNABLE;
   sched();
   release(&ptable.lock);
+  int             wait(void);
+  void            wakeup(void*);
+  void            yield(void);
+  int             cps(void);          // <--- AGREGAR
+  int             chpr(int, int);
 }
 
 // A fork child's very first scheduling by scheduler()
@@ -531,4 +542,49 @@ procdump(void)
     }
     cprintf("\n");
   }
+}
+
+int
+cps(void)
+{
+  struct proc *p;
+  sti();
+
+  acquire(&ptable.lock);
+  cprintf("name \t pid \t state \t\t priority\n");
+  for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
+    if(p->state == SLEEPING)
+      cprintf("%s \t %d \t SLEEPING \t %d\n", p->name, p->pid, p->priority);
+    else if(p->state == RUNNING)
+      cprintf("%s \t %d \t RUNNING \t %d\n", p->name, p->pid, p->priority);
+    else if(p->state == RUNNABLE)
+      cprintf("%s \t %d \t RUNNABLE \t %d\n", p->name, p->pid, p->priority);
+  }
+  release(&ptable.lock);
+  return 22;
+}
+
+// Cambia la prioridad de un proceso dado su PID
+int
+chpr(int pid, int priority)
+{
+  struct proc *p;
+  int found = 0;
+
+  if(priority < 0 || priority > 20)
+    return -1;
+
+  acquire(&ptable.lock);
+  for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
+    if(p->pid == pid){
+      p->priority = priority;
+      found = 1;
+      break;
+    }
+  }
+  release(&ptable.lock);
+
+  if(!found)
+    return -1;
+  return pid;
 }
